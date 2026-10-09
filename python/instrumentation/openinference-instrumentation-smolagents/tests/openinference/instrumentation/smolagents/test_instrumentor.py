@@ -1,5 +1,6 @@
 import json
 from contextlib import contextmanager
+from types import SimpleNamespace
 from typing import Any, Iterator, Optional
 from unittest.mock import MagicMock, patch
 
@@ -559,15 +560,30 @@ class TestModels:
             attributes.pop(f"{LLM_OUTPUT_MESSAGES}.0.{MESSAGE_CONTENTS}.0.{MESSAGE_CONTENT_TYPE}")
             == "text"
         )
-        assert isinstance(
-            attributes.pop(f"{LLM_OUTPUT_MESSAGES}.0.{MESSAGE_CONTENTS}.1.{MESSAGE_CONTENT_TEXT}"),
-            str,
-        )
-        assert (
-            attributes.pop(f"{LLM_OUTPUT_MESSAGES}.0.{MESSAGE_CONTENTS}.1.{MESSAGE_CONTENT_TYPE}")
-            == "text"
-        )
+        assert isinstance(attributes.pop(f"{LLM_OUTPUT_MESSAGES}.0.message.reasoning"), str)
         assert not attributes
+
+
+@pytest.mark.parametrize(
+    "hide, expected", [(None, "thinking"), ("true", None), ("false", "thinking")]
+)
+def test_llm_output_messages_reasoning_respects_hide_flag(
+    monkeypatch: pytest.MonkeyPatch, hide: Optional[str], expected: Optional[str]
+) -> None:
+    if hide is None:
+        monkeypatch.delenv("OPENINFERENCE_HIDE_LLM_REASONING", raising=False)
+    else:
+        monkeypatch.setenv("OPENINFERENCE_HIDE_LLM_REASONING", hide)
+    raw_message = SimpleNamespace(reasoning_content="thinking")
+    output_message = SimpleNamespace(
+        role="assistant",
+        content="answer",
+        raw=SimpleNamespace(choices=[SimpleNamespace(message=raw_message)]),
+        tool_calls=None,
+    )
+    attributes = dict(_llm_output_messages(output_message))
+    assert attributes.get(f"{LLM_OUTPUT_MESSAGES}.0.message.reasoning") == expected
+    assert f"{LLM_OUTPUT_MESSAGES}.0.{MESSAGE_CONTENTS}.1.{MESSAGE_CONTENT_TEXT}" not in attributes
 
 
 class TestAgents:

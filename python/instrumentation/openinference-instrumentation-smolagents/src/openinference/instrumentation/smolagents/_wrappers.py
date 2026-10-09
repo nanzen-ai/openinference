@@ -1,3 +1,4 @@
+import os
 from collections.abc import Generator
 from enum import Enum
 from inspect import signature
@@ -421,7 +422,8 @@ def _llm_output_messages(output_message: Any) -> Mapping[str, AttributeValue]:
                         oi.ImageMessageContent(type="image", image=oi.Image(url=url))
                     )
 
-    # Add the reasoning_content if available in raw.choices[0].message structure
+    # Record reasoning_content from raw.choices[0].message separately from the reply's contents
+    reasoning: Optional[str] = None
     if (raw := getattr(output_message, "raw", None)) is not None:
         if (choices := getattr(raw, "choices", None)) is not None:
             if isinstance(choices, list) and len(choices) > 0:
@@ -429,9 +431,7 @@ def _llm_output_messages(output_message: Any) -> Mapping[str, AttributeValue]:
                     if (
                         reasoning_content := getattr(message, "reasoning_content", None)
                     ) is not None:
-                        oi_message_contents.append(
-                            oi.TextMessageContent(type="text", text=reasoning_content)
-                        )
+                        reasoning = reasoning_content
 
     oi_message["contents"] = oi_message_contents
     oi_tool_calls: list[oi.ToolCall] = []
@@ -449,7 +449,14 @@ def _llm_output_messages(output_message: Any) -> Mapping[str, AttributeValue]:
                 oi_tool_call["function"] = oi_function
                 oi_tool_calls.append(oi_tool_call)
     oi_message["tool_calls"] = oi_tool_calls
-    return oi.get_llm_output_message_attributes(messages=[oi_message])
+    attributes = dict(oi.get_llm_output_message_attributes(messages=[oi_message]))
+    if reasoning is not None and not _hide_llm_reasoning():
+        attributes[f"{LLM_OUTPUT_MESSAGES}.0.message.reasoning"] = reasoning
+    return attributes
+
+
+def _hide_llm_reasoning() -> bool:
+    return os.getenv(OPENINFERENCE_HIDE_LLM_REASONING, "false").lower() == "true"
 
 
 def _output_value_and_mime_type(output: Any) -> Iterator[Tuple[str, Any]]:
@@ -773,6 +780,7 @@ LLM_MODEL_NAME = SpanAttributes.LLM_MODEL_NAME
 LLM_PROVIDER = SpanAttributes.LLM_PROVIDER
 LLM_SYSTEM = SpanAttributes.LLM_SYSTEM
 LLM_OUTPUT_MESSAGES = SpanAttributes.LLM_OUTPUT_MESSAGES
+
 LLM_PROMPTS = SpanAttributes.LLM_PROMPTS
 LLM_TOKEN_COUNT_COMPLETION = SpanAttributes.LLM_TOKEN_COUNT_COMPLETION
 LLM_TOKEN_COUNT_PROMPT = SpanAttributes.LLM_TOKEN_COUNT_PROMPT
@@ -819,3 +827,6 @@ TOOL_JSON_SCHEMA = ToolAttributes.TOOL_JSON_SCHEMA
 TOOL_CALL_FUNCTION_ARGUMENTS_JSON = ToolCallAttributes.TOOL_CALL_FUNCTION_ARGUMENTS_JSON
 TOOL_CALL_FUNCTION_NAME = ToolCallAttributes.TOOL_CALL_FUNCTION_NAME
 TOOL_CALL_ID = ToolCallAttributes.TOOL_CALL_ID
+
+# environment variables
+OPENINFERENCE_HIDE_LLM_REASONING = "OPENINFERENCE_HIDE_LLM_REASONING"
